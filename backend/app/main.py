@@ -1,0 +1,160 @@
+from datetime import date, datetime, timezone
+from uuid import uuid4
+from collections import Counter
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+
+from .config import settings
+from .schemas import AnalysisJob, AnalysisRequest
+from .services.keywords import extract_keywords
+from .services.sentiment import classify_sentiment
+from .services.youtube import YouTubeServiceError, fetch_period, resolve_channel
+
+app = FastAPI(title="YouTube Comment Analyzer API", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# First milestone uses process memory; durable job storage is planned next.
+JOBS: dict[str, dict] = {}
+COMMENTS: dict[str, list[dict]] = {}
+
+
+def _sentiment_counts(items: list[dict]) -> dict:
+    counts = Counter(item["sentiment"] for item in items)
+    return {"praise": counts["praise"], "neutral": counts["neutral"], "criticism": counts["criticism"]}
+
+
+def _parse_dt(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _analyze_period(label: str, date_range, channel_id: str, group_by: str):
+    videos, raw_comments, skipped = fetch_period(channel_id, date_range.model_dump(), group_by)
+    analyzed = []
+    for comment in raw_comments:
+        comment["sentiment"] = classify_sentiment(comment["text"])
+        comment["period"] = label
+        analyzed.append(comment)
+    return videos, analyzed, skipped
+
+
+def _make_buckets(label: str, date_range, videos: list[dict], comments: list[dict], granularity: str):
+    from datetime import timedelta
+    span = 7 if granularity == "week" else 30
+    buckets = []
+    cursor = date_range.start
+    index = 0
+    while cursor <= date_range.end:
+        end = min(cursor + timedelta(days=span - 1), date_range.end)
+        bucket_comments = [
+            item for item in comments
+            if cursor <= _parse_dt(item["video"]["publishedAt"]).date() <= end
+        ]
+        bucket_videos = [
+            item for item in videos
+            if cursor <= date.fromisoformat(item["snippet"]["publishedAt"][:10]) <= end
+        ]
+        buckets.append({
+            "period": label, "index": index, "start": cursor, "end": end,
+            "videoCount": len(bucket_videos), "commentCount": len(bucket_comments),
+            "sentiment": _sentiment_counts(bucket_comments),
+        })
+        cursor = end + timedelta(days=1)
+        index += 1
+    return buckets
+
+
+def _run_analysis(request: AnalysisRequest) -> dict:
+    channel = resolve_channel(request.channel)
+    results = {}
+    all_comments = []
+    all_trend = []
+    max_days = max((request.periodA.end - request.periodA.start).days + 1,
+                   (request.periodB.end - request.periodB.start).days + 1)
+    granularity = "week" if max_days <= 120 else "month"
+
+    for label, date_range in (("A", request.periodA), ("B", request.periodB)):
+        videos, comments, skipped = _analyze_period(label, date_range, channel["id"], request.groupBy)
+        all_comments.extend(comments)
+        results[label] = {
+            "period": label, "range": date_range.model_dump(),
+            "videoCount": len(videos), "videosSkipped": skipped,
+            "commentCount": len(comments), "sentiment": _sentiment_counts(comments),
+        }
+        all_trend.extend(_make_buckets(label, date_range, videos, comments, granularity))
+        results.setdefault("_keywords", {})[label] = extract_keywords(comments)
+
+    return {
+        "source": "youtube", "channel": channel, "groupBy": request.groupBy,
+        "generatedAt": datetime.now(timezone.utc), "granularity": granularity,
+        "periods": {key: results[key] for key in ("A", "B")},
+        "trend": all_trend, "keywords": results["_keywords"],
+    }, all_comments
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.post("/analyses", response_model=AnalysisJob, status_code=202)
+def create_analysis(request: AnalysisRequest):
+    today = datetime.now(timezone.utc).date()
+    for label, period in (("A", request.periodA), ("B", request.periodB)):
+        if period.start > period.end or period.end > today or (period.end - period.start).days > 365:
+            raise HTTPException(422, detail={"error": {"code": "INVALID_DATE_RANGE", "message": f"Period {label} must be valid, non-future, and at most 366 days."}})
+    if not (request.periodA.end < request.periodB.start or request.periodB.end < request.periodA.start):
+        raise HTTPException(422, detail={"error": {"code": "OVERLAPPING_PERIODS", "message": "Periods A and B must not overlap."}})
+
+    key = uuid4().hex
+    job = {"key": key, "status": "running", "progress": 10, "step": "Resolving channel", "error": None, "result": None}
+    JOBS[key] = job
+    try:
+        job["step"] = "Fetching videos and comments"
+        job["progress"] = 35
+        result, comments = _run_analysis(request)
+        COMMENTS[key] = comments
+        job.update(status="done", progress=100, step="Analysis complete", result=result)
+    except YouTubeServiceError as exc:
+        job.update(status="error", progress=100, step="Analysis failed", error={"code": exc.code, "message": exc.message})
+        if exc.status_code >= 500:
+            raise HTTPException(exc.status_code, detail={"error": job["error"]})
+    except Exception as exc:
+        job.update(status="error", progress=100, step="Analysis failed", error={"code": "ANALYSIS_FAILED", "message": str(exc)})
+    return job
+
+
+@app.get("/analyses/{key}", response_model=AnalysisJob)
+def get_analysis(key: str):
+    if key not in JOBS:
+        raise HTTPException(404, detail={"error": {"code": "ANALYSIS_NOT_FOUND", "message": "Analysis not found."}})
+    return JOBS[key]
+
+
+@app.get("/analyses/{key}/comments")
+def get_comments(
+    key: str,
+    period: str | None = None,
+    sentiment: str | None = None,
+    keyword: str | None = None,
+    cursor: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+):
+    if key not in JOBS or JOBS[key]["status"] != "done":
+        raise HTTPException(404, detail={"error": {"code": "ANALYSIS_NOT_FOUND", "message": "Completed analysis not found."}})
+    items = COMMENTS.get(key, [])
+    if period:
+        items = [item for item in items if item["period"] == period]
+    if sentiment:
+        items = [item for item in items if item["sentiment"] == sentiment]
+    if keyword:
+        items = [item for item in items if keyword.casefold() in item["text"].casefold()]
+    items = sorted(items, key=lambda item: (-item["likeCount"], item["publishedAt"], item["id"]))
+    page = items[cursor:cursor + limit]
+    return {"items": page, "total": len(items), "nextCursor": cursor + limit if cursor + limit < len(items) else None}
