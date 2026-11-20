@@ -23,19 +23,19 @@ LABEL_MAP = {
 
 # Personal circumstances should not automatically count as criticism.
 PERSONAL_CONTEXT_PATTERNS = [
-    r"\\bmy family is struggling\\b",
-    r"\\bi lost my job\\b",
-    r"\\bmy father is sick\\b",
-    r"\\bmy mother is sick\\b",
-    r"\\bplease pray for (me|him|her|us|my family)\\b",
-    r"\\bi live in a poor country\\b",
-    r"\\bi don't know what to do\\b",
+    r"\bmy family is struggling\b",
+    r"\bi lost my job\b",
+    r"\bmy father is sick\b",
+    r"\bmy mother is sick\b",
+    r"\bplease pray for (me|him|her|us|my family)\b",
+    r"\bi live in a poor country\b",
+    r"\bi don't know what to do\b",
 ]
 
 # Clearly conversational comments without an opinion about the creator.
 NEUTRAL_DISCUSSION_PATTERNS = [
-    r"\\bwhat is happening here\\b",
-    r"\\bhappy and sad at the same time\\b",
+    r"\bwhat is happening here\b",
+    r"\bhappy and sad at the same time\b",
 ]
 
 
