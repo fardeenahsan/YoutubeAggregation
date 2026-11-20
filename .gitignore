@@ -25,3 +25,12 @@ coverage/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Visual Studio
+.vs/
+
+# Local machine-learning model artifacts
+*.pt
+*.pth
+*.safetensors
+pytorch_model.bin
