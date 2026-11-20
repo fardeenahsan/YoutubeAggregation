@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 from uuid import uuid4
 from collections import Counter
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
@@ -20,7 +20,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# First milestone uses process memory; durable job storage is planned next.
+# Jobs and comments are held in process memory for this first milestone.
+# Use a persistent queue/database before deploying multiple workers or production traffic.
 JOBS: dict[str, dict] = {}
 COMMENTS: dict[str, list[dict]] = {}
 
@@ -70,8 +71,11 @@ def _make_buckets(label: str, date_range, videos: list[dict], comments: list[dic
     return buckets
 
 
-def _run_analysis(request: AnalysisRequest) -> dict:
+def _run_analysis(request: AnalysisRequest, key: str) -> tuple[dict, list[dict]]:
     channel = resolve_channel(request.channel)
+    job = JOBS[key]
+    job.update(progress=20, step="Fetching comments for period A")
+
     results = {}
     all_comments = []
     all_trend = []
@@ -79,7 +83,9 @@ def _run_analysis(request: AnalysisRequest) -> dict:
                    (request.periodB.end - request.periodB.start).days + 1)
     granularity = "week" if max_days <= 120 else "month"
 
-    for label, date_range in (("A", request.periodA), ("B", request.periodB)):
+    for index, (label, date_range) in enumerate((("A", request.periodA), ("B", request.periodB))):
+        if index == 1:
+            job.update(progress=55, step="Fetching comments for period B")
         videos, comments, skipped = _analyze_period(label, date_range, channel["id"], request.groupBy)
         all_comments.extend(comments)
         results[label] = {
@@ -87,15 +93,44 @@ def _run_analysis(request: AnalysisRequest) -> dict:
             "videoCount": len(videos), "videosSkipped": skipped,
             "commentCount": len(comments), "sentiment": _sentiment_counts(comments),
         }
+        job.update(progress=45 if label == "A" else 80, step=f"Extracting keywords for period {label}")
         all_trend.extend(_make_buckets(label, date_range, videos, comments, granularity))
         results.setdefault("_keywords", {})[label] = extract_keywords(comments)
 
-    return {
+    result = {
         "source": "youtube", "channel": channel, "groupBy": request.groupBy,
         "generatedAt": datetime.now(timezone.utc), "granularity": granularity,
         "periods": {key: results[key] for key in ("A", "B")},
         "trend": all_trend, "keywords": results["_keywords"],
-    }, all_comments
+    }
+    return result, all_comments
+
+
+def _process_analysis(key: str, request: AnalysisRequest) -> None:
+    """Run a submitted analysis after returning the job key to the browser."""
+    job = JOBS[key]
+    job.update(status="running", progress=10, step="Resolving YouTube channel")
+    try:
+        result, comments = _run_analysis(request, key)
+        COMMENTS[key] = comments
+        job.update(status="done", progress=100, step="Analysis complete", result=result)
+    except YouTubeServiceError as exc:
+        job.update(
+            status="error",
+            progress=100,
+            step="Analysis failed",
+            error={"code": exc.code, "message": exc.message},
+        )
+    except Exception:
+        # Keep internal exception details out of the public API response.
+        job.update(
+            status="error",
+            progress=100,
+            step="Analysis failed",
+            error={"code": "ANALYSIS_FAILED", "message": "The analysis failed. Check the backend terminal for details."},
+        )
+        import traceback
+        traceback.print_exc()
 
 
 @app.get("/health")
@@ -104,7 +139,7 @@ def health():
 
 
 @app.post("/analyses", response_model=AnalysisJob, status_code=202)
-def create_analysis(request: AnalysisRequest):
+def create_analysis(request: AnalysisRequest, background_tasks: BackgroundTasks):
     today = datetime.now(timezone.utc).date()
     for label, period in (("A", request.periodA), ("B", request.periodB)):
         if period.start > period.end or period.end > today or (period.end - period.start).days > 365:
@@ -113,21 +148,12 @@ def create_analysis(request: AnalysisRequest):
         raise HTTPException(422, detail={"error": {"code": "OVERLAPPING_PERIODS", "message": "Periods A and B must not overlap."}})
 
     key = uuid4().hex
-    job = {"key": key, "status": "running", "progress": 10, "step": "Resolving channel", "error": None, "result": None}
-    JOBS[key] = job
-    try:
-        job["step"] = "Fetching videos and comments"
-        job["progress"] = 35
-        result, comments = _run_analysis(request)
-        COMMENTS[key] = comments
-        job.update(status="done", progress=100, step="Analysis complete", result=result)
-    except YouTubeServiceError as exc:
-        job.update(status="error", progress=100, step="Analysis failed", error={"code": exc.code, "message": exc.message})
-        if exc.status_code >= 500:
-            raise HTTPException(exc.status_code, detail={"error": job["error"]})
-    except Exception as exc:
-        job.update(status="error", progress=100, step="Analysis failed", error={"code": "ANALYSIS_FAILED", "message": str(exc)})
-    return job
+    JOBS[key] = {
+        "key": key, "status": "queued", "progress": 0,
+        "step": "Queued", "error": None, "result": None,
+    }
+    background_tasks.add_task(_process_analysis, key, request)
+    return JOBS[key]
 
 
 @app.get("/analyses/{key}", response_model=AnalysisJob)
