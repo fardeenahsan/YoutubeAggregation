@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .schemas import AnalysisJob, AnalysisRequest
 from .services.keywords import extract_keywords
-from .services.sentiment import classify_sentiment
+from .services.sentiment import classify_sentiments
 from .services.youtube import YouTubeServiceError, fetch_period, resolve_channel
 
 app = FastAPI(title="YouTube Comment Analyzer API", version="0.1.0")
@@ -36,12 +36,21 @@ def _parse_dt(value: str) -> datetime:
 
 
 def _analyze_period(label: str, date_range, channel_id: str, group_by: str):
-    videos, raw_comments, skipped = fetch_period(channel_id, date_range.model_dump(), group_by)
+    videos, raw_comments, skipped = fetch_period(
+        channel_id,
+        date_range.model_dump(),
+        group_by,
+    )
+
+    texts = [comment["text"] for comment in raw_comments]
+    sentiments = classify_sentiments(texts)
+
     analyzed = []
-    for comment in raw_comments:
-        comment["sentiment"] = classify_sentiment(comment["text"])
+    for comment, sentiment in zip(raw_comments, sentiments):
+        comment["sentiment"] = sentiment
         comment["period"] = label
         analyzed.append(comment)
+
     return videos, analyzed, skipped
 
 
