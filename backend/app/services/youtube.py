@@ -74,7 +74,7 @@ def fetch_period(channel_id: str, period: dict, group_by: str) -> tuple[list[dic
         order="date",
         publishedAfter=_iso_utc(period["start"]),
         publishedBefore=_iso_utc(period["end"], True),
-        maxResults=min(50, settings.max_videos_per_period),
+        maxResults=min(20, settings.max_videos_per_period),
     ).execute()
     videos = search_response.get("items", [])
     comments: list[dict] = []
@@ -91,11 +91,11 @@ def fetch_period(channel_id: str, period: dict, group_by: str) -> tuple[list[dic
         }
         token = None
         collected = 0
-        while collected < settings.max_comments_per_video:
+        while collected < min(settings.max_comments_per_video, 100):
             batch = api.commentThreads().list(
                 part="snippet,replies",
                 videoId=video_id,
-                maxResults=min(100, settings.max_comments_per_video - collected),
+                maxResults=min(100, min(settings.max_comments_per_video, 100) - collected),
                 pageToken=token,
                 textFormat="plainText",
                 order="time",
@@ -106,7 +106,7 @@ def fetch_period(channel_id: str, period: dict, group_by: str) -> tuple[list[dic
                 comments.append(_comment_record(top, top_snippet, video_info, False))
                 collected += 1
                 for reply in thread.get("replies", {}).get("comments", []):
-                    if collected >= settings.max_comments_per_video:
+                    if collected >= min(settings.max_comments_per_video, 100):
                         break
                     comments.append(_comment_record(reply, reply["snippet"], video_info, True))
                     collected += 1
