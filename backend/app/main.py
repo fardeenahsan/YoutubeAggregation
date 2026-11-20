@@ -35,13 +35,17 @@ def _parse_dt(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def _analyze_period(label: str, date_range, channel_id: str, group_by: str):
+def _analyze_period(label: str, date_range, channel_id: str, group_by: str, job: dict):
     videos, raw_comments, skipped = fetch_period(
         channel_id,
         date_range.model_dump(),
         group_by,
     )
 
+    job.update(
+        progress=35 if label == "A" else 70,
+        step=f"Analyzing sentiment for period {label} ({len(raw_comments):,} comments)",
+    )
     texts = [comment["text"] for comment in raw_comments]
     sentiments = classify_sentiments(texts)
 
@@ -95,7 +99,7 @@ def _run_analysis(request: AnalysisRequest, key: str) -> tuple[dict, list[dict]]
     for index, (label, date_range) in enumerate((("A", request.periodA), ("B", request.periodB))):
         if index == 1:
             job.update(progress=55, step="Fetching comments for period B")
-        videos, comments, skipped = _analyze_period(label, date_range, channel["id"], request.groupBy)
+        videos, comments, skipped = _analyze_period(label, date_range, channel["id"], request.groupBy, job)
         all_comments.extend(comments)
         results[label] = {
             "period": label, "range": date_range.model_dump(),
