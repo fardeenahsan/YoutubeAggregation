@@ -47,7 +47,15 @@ def _analyze_period(label: str, date_range, channel_id: str, group_by: str, job:
         step=f"Analyzing sentiment for period {label} ({len(raw_comments):,} comments)",
     )
     texts = [comment["text"] for comment in raw_comments]
-    sentiments = classify_sentiments(texts)
+    start_progress, end_progress = (35, 44) if label == "A" else (70, 79)
+    def report_sentiment_progress(done: int, total: int) -> None:
+        fraction = done / total if total else 1
+        job.update(
+            progress=round(start_progress + (end_progress - start_progress) * fraction),
+            step=f"Sentiment analysis period {label}: {done:,}/{total:,} comments",
+        )
+    job.update(step=f"Loading sentiment model for period {label}")
+    sentiments = classify_sentiments(texts, progress_callback=report_sentiment_progress)
 
     analyzed = []
     for comment, sentiment in zip(raw_comments, sentiments):
