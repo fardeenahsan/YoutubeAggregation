@@ -79,9 +79,9 @@ def classify_sentiments(texts: list[str]) -> list[str]:
     valid_texts = [cleaned[index] for index in valid_indices]
     predictions = _sentiment_pipeline()(
         valid_texts,
-        batch_size=32,
+        batch_size=64,
         truncation=True,
-        max_length=512,
+        max_length=128,
     )
 
     for index, prediction in zip(valid_indices, predictions):
