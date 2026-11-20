@@ -1,5 +1,6 @@
 import re
 from functools import lru_cache
+from collections.abc import Callable
 
 from transformers import (
     AutoModelForSequenceClassification,
@@ -59,34 +60,45 @@ def _sentiment_pipeline():
     )
 
 
-def classify_sentiments(texts: list[str]) -> list[str]:
-    """Classify comments using RoBERTa with contextual corrections."""
+def classify_sentiments(
+    texts: list[str],
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> list[str]:
+    """Classify comments in visible batches using RoBERTa."""
     if not texts:
         return []
 
     cleaned = [text.strip() if text else "" for text in texts]
     results = ["neutral"] * len(cleaned)
-    valid_indices = []
-
-    for index, text in enumerate(cleaned):
-        if not text or _is_contextually_neutral(text):
-            continue
-        valid_indices.append(index)
+    valid_indices = [
+        index for index, text in enumerate(cleaned)
+        if text and not _is_contextually_neutral(text)
+    ]
 
     if not valid_indices:
+        if progress_callback:
+            progress_callback(len(cleaned), len(cleaned))
         return results
 
-    valid_texts = [cleaned[index] for index in valid_indices]
-    predictions = _sentiment_pipeline()(
-        valid_texts,
-        batch_size=64,
-        truncation=True,
-        max_length=128,
-    )
+    classifier = _sentiment_pipeline()
+    batch_size = 64
+    total = len(valid_indices)
 
-    for index, prediction in zip(valid_indices, predictions):
-        label = prediction["label"].lower()
-        results[index] = LABEL_MAP.get(label, "neutral")
+    for start in range(0, total, batch_size):
+        batch_indices = valid_indices[start:start + batch_size]
+        batch_texts = [cleaned[index] for index in batch_indices]
+        predictions = classifier(
+            batch_texts,
+            batch_size=batch_size,
+            truncation=True,
+            max_length=128,
+        )
+        for index, prediction in zip(batch_indices, predictions):
+            label = prediction["label"].lower()
+            results[index] = LABEL_MAP.get(label, "neutral")
+
+        if progress_callback:
+            progress_callback(min(start + len(batch_indices), total), total)
 
     return results
 
