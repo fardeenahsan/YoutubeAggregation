@@ -192,4 +192,4 @@ def get_comments(
         items = [item for item in items if keyword.casefold() in item["text"].casefold()]
     items = sorted(items, key=lambda item: (-item["likeCount"], item["publishedAt"], item["id"]))
     page = items[cursor:cursor + limit]
-    return {"items": page, "total": len(items), "nextCursor": cursor + limit if cursor + limit < len(items) else None}
+    return {"items": page, "total": len(items), "nextCursor": str(cursor + limit) if cursor + limit < len(items) else None}
