@@ -4,8 +4,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     youtube_api_key: str = ""
     cors_origins: str = "http://localhost:5173"
-    max_comments_per_video: int = 500
-    max_videos_per_period: int = 50
+    max_comments_per_video: int = 100
+    max_videos_per_period: int = 20
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
