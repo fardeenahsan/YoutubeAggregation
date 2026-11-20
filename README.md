@@ -4,7 +4,7 @@ A full-stack application that analyzes comments on a YouTube channel across two 
 
 ## Project ownership and credits
 
-- **Project owner / maintainer:** Fardeen Ahsan ([`@fardeenahsan`](https://github.com/fardeenahsan)).
+- **Project owner / maintainer:**Muhammad Fardeen Ahsan ([`@fardeenahsan`](https://github.com/fardeenahsan)).
 - **Sentiment model:** [Cardiff NLP](https://huggingface.co/cardiffnlp), using [`cardiffnlp/twitter-roberta-base-sentiment-latest`](https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest). The model is an external research artifact; it is not presented as an original model developed in this repository.
 - **Core frameworks and services:** React, FastAPI, Hugging Face Transformers, PyTorch, and the YouTube Data API v3. See the dependency manifests for package-level details.
 
