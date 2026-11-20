@@ -1,111 +1,79 @@
-# YouTube Channel Comment Analyzer: Frontend
+# Frontend
 
-React dashboard where a creator enters a YouTube channel, picks two date ranges,
-and compares comment sentiment (praise / neutral / criticism), trends, and top
-keywords. Every number links to the comments behind it.
+React dashboard for comparing YouTube channel comment sentiment across two date ranges.
 
-> **Phase 1 runs on DEMO DATA only.** There is no backend integration yet. All
-> numbers and comments are generated locally and deterministically, and the UI
-> labels them as demo data everywhere they appear. Nothing comes from the
-> YouTube API.
+## Features
 
-Stack: React 19, TypeScript, Vite, Recharts, plain CSS. Tests use Vitest and
-Testing Library. No state-management or UI-kit libraries.
+- Channel handle, channel ID, and URL input.
+- Two-period comparison workflow.
+- Praise, neutral, and criticism summaries.
+- Sentiment trends and keyword breakdowns.
+- Paginated comment evidence linked to source videos.
+- Live analysis-job progress and error states.
+- Deterministic demo mode when no backend URL is configured.
 
 ## Requirements
 
-- Node.js 20.19+ (developed on Node 24)
-- npm 10+
+- Node.js 20.19+.
+- npm 10+.
 
-## Install
+## Setup
 
-```bash
-cd frontend
-npm install
-```
-
-## Run
+From `frontend/`:
 
 ```bash
-npm run dev          # http://localhost:5173
+npm ci
+cp .env.example .env
+npm run dev
 ```
 
-Port 5173 matches the backend's default `CORS_ORIGINS`.
+On Windows PowerShell, use:
 
-### Demo channels
+```powershell
+npm ci
+Copy-Item .env.example .env
+npm run dev
+```
 
-Any valid handle produces a deterministic demo analysis. These reserved handles
-reproduce each error state (they also appear as chips under the form):
+Open http://localhost:5173.
 
-| Channel | Shows |
-|---|---|
-| `@creatorlab` | A successful analysis |
-| `@demo-not-found` | Invalid / unknown channel |
-| `@demo-no-comments` | Comments unavailable |
-| `@demo-quota` | Daily YouTube quota exhausted |
-| `@demo-offline` | Network failure |
+## Connect to the backend
 
-## Build
+The frontend reads `VITE_API_BASE_URL` from `.env`. The provided `.env.example` points to the local FastAPI server:
+
+```dotenv
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+When this variable is set, the app uses the real HTTP API. If it is absent, the app uses deterministic demo data. Start the backend before submitting a live YouTube analysis. See [the backend setup guide](../backend/README.md).
+
+## Quality checks
 
 ```bash
-npm run build        # type-checks, then writes dist/
-npm run preview      # serves dist/ at http://localhost:4173
+npm run check
 ```
 
-The results dashboard (and Recharts) is lazy-loaded, so the first load is about 82 kB
-gzipped.
+This runs ESLint, TypeScript type-checking, Vitest, and the production build.
 
-## Test and check
+Individual commands:
 
-```bash
-npm test             # Vitest, single run
-npm run test:watch   # watch mode
-npm run lint         # ESLint
-npm run typecheck    # tsc, no emit
-npm run check        # all of the above + build
-```
-
-Tests cover:
-
-- `src/lib/validation.test.ts`: channel input parsing (handles, IDs, URLs, bad input) and date-range rules.
-- `src/mock/mockAnalysisService.test.ts`: determinism; internal consistency (keyword counts equal evidence totals, trend buckets sum to period totals); pagination; error scenarios; abort.
-- `src/App.test.tsx`: form validation and focus management, demo result rendering, keyword/sentiment/trend evidence selection, sentiment filter, load more, and every error state.
+- `npm run lint`
+- `npm run typecheck`
+- `npm test`
+- `npm run build`
 
 ## Project structure
 
-```
-src/
-  api/          Typed contract: domain types, AnalysisService interface, error model
-  mock/         Deterministic DEMO DATA generator + mock AnalysisService
-  hooks/        useAnalysis (run/abort lifecycle), useComments (paged evidence)
-  lib/          Pure helpers: dates, formatting, form validation
-  components/   Reusable UI: Card, SegmentedControl, badges, SentimentBar, icons
-  dashboard/    Feature UI: form, status views, summary, charts, keywords, evidence
-  styles/       Design tokens (light + dark) and base styles
-docs/
-  api-contract.md   Proposed backend contract and open questions
-```
+- `src/api/` — typed API contract, HTTP client, and service selection.
+- `src/mock/` — deterministic demo-data service.
+- `src/hooks/` — analysis and comment-loading lifecycle.
+- `src/lib/` — date, formatting, and validation helpers.
+- `src/components/` — reusable interface components.
+- `src/dashboard/` — analysis form, status, charts, summaries, and comment evidence.
+- `src/styles/` — design tokens and application styles.
 
-## Connecting the real backend (later)
+## Notes
 
-1. Agree the schema in [`docs/api-contract.md`](docs/api-contract.md) with the backend team.
-2. Implement `AnalysisService` (`src/api/service.ts`) over `fetch`, mapping failures to `AnalysisError` codes.
-3. Return it from `createAnalysisService()` in `src/api/index.ts` (e.g. when `VITE_API_BASE_URL` is set).
-
-Components never import the mock directly, except the demo-channel shortcuts in
-`App.tsx`, which only appear while `service.source === 'demo'`.
-
-## Accessibility
-
-- Native form controls with labels. Errors are linked via `aria-describedby`, and the first invalid field receives focus on submit.
-- Every chart has a **View as table** alternative whose cells are buttons, so all evidence is reachable by keyboard.
-- Sentiment and period are never shown by color alone: every colored mark sits beside a text label.
-- Chart colors were checked for color-vision deficiency and contrast in light and dark modes. Text meets WCAG AA contrast.
-- Supports `prefers-color-scheme`, `prefers-reduced-motion`, and `forced-colors`.
-
-## Known limitations (Phase 1)
-
-- Demo data only; no HTTP client yet (by design, until the contract is agreed).
-- Demo evidence shows video titles without links, because demo video IDs are made up. YouTube links appear only for real (`source: "youtube"`) results.
-- Periods are grouped by video publish date only. Comment-date grouping is reserved in the types but not exposed in the UI.
-- No URL state yet: an analysis can't be shared by link.
+- The real API requires a configured YouTube Data API key in the backend.
+- Demo mode does not call YouTube and is useful for checking the UI without backend credentials.
+- The backend currently keeps jobs and comments in memory; it is intended for local prototype evaluation, not production deployment.
