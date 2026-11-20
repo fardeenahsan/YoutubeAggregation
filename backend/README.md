@@ -1,38 +1,84 @@
 # Backend
 
-FastAPI service for fetching YouTube channel comments and analyzing sentiment and keywords.
+FastAPI service for retrieving YouTube channel comments and analyzing sentiment and keywords.
 
-## Local setup
+## Requirements
+
+- Python 3.12 recommended.
+- A YouTube Data API v3 key.
+- Internet access for package installation and the initial model download.
+
+## Windows setup (PowerShell)
+
+Run from the repository root:
+
+```powershell
+cd backend
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+Edit `.env` and set `YOUTUBE_API_KEY` to a YouTube Data API v3 key.
+
+## macOS / Linux setup
+
+Run from the repository root:
 
 ```bash
 cd backend
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
-# Install the CPU build of PyTorch (recommended for local development)
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install -r requirements.txt
-
-# Download the sentiment model once. The application loads it from the
-# local Hugging Face cache and does not download model files at runtime.
-python -c "from transformers import AutoTokenizer, AutoModelForSequenceClassification; m='cardiffnlp/twitter-roberta-base-sentiment-latest'; AutoTokenizer.from_pretrained(m); AutoModelForSequenceClassification.from_pretrained(m)"
-
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements.txt
 cp .env.example .env
-# Add your YouTube Data API v3 key to .env
+```
+
+Edit `.env` and set `YOUTUBE_API_KEY`.
+
+## Download the sentiment model
+
+The first setup requires downloading the Cardiff NLP RoBERTa model (approximately 500 MB). Run this once while the virtual environment is active:
+
+```bash
+python -c "from transformers import AutoTokenizer, AutoModelForSequenceClassification; m='cardiffnlp/twitter-roberta-base-sentiment-latest'; AutoTokenizer.from_pretrained(m); AutoModelForSequenceClassification.from_pretrained(m)"
+```
+
+The application loads the model from the local Hugging Face cache with `local_files_only=True`; it does not download model files during analysis.
+
+## Run
+
+From `backend/`, with the virtual environment active:
+
+```bash
 uvicorn app.main:app --reload
 ```
 
-API docs: http://localhost:8000/docs
+- Health: http://localhost:8000/health
+- Interactive API docs: http://localhost:8000/docs
 
-## Endpoints
+## API endpoints
 
-- `GET /health`
-- `POST /analyses`
-- `GET /analyses/{key}`
-- `GET /analyses/{key}/comments`
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/health` | Health check |
+| POST | `/analyses` | Submit an analysis and receive a job key |
+| GET | `/analyses/{key}` | Poll status and retrieve the result |
+| GET | `/analyses/{key}/comments` | Retrieve filtered, paginated comment evidence |
 
-Analysis requests run as background tasks and the frontend polls the job endpoint until completion. Jobs and comments are currently held in process memory, so they are lost when the backend restarts and are not shared across multiple workers. Use a persistent queue and database before production deployment.
+Analysis runs as a background task. The frontend polls the job endpoint and receives progress updates while sentiment is classified in batches.
 
-## Data and quota notes
+## Current prototype limitations
 
-The service fetches videos published in each requested date range, then reads their available comment threads. YouTube may disable comments, omit replies from a page, or reject requests when quota is exhausted. The API key must remain in the backend environment and must never be placed in frontend code or committed to Git.
+- Jobs and comments are stored in process memory. They disappear when the backend restarts and are not shared between multiple backend workers.
+- Run a single backend process for local evaluation.
+- This is not yet configured for production traffic. A persistent database, durable job queue, caching, authentication, rate limiting, and deployment configuration are still needed.
+- YouTube API quota limits and disabled comments can affect the data returned.
+- Collection is capped at 20 videos per period and 100 comments per video.
+- The sentiment model runs on CPU by default.
+
+Keep the API key in `.env`. Never commit it or expose it in frontend configuration.
