@@ -20,6 +20,18 @@ A full-stack application that analyzes comments on a YouTube channel across two 
 
 The frontend communicates with the backend through the typed HTTP service in `frontend/src/api/`. The backend exposes the endpoints documented in [backend/README.md](backend/README.md).
 
+## Fast dashboard preview (no API key or model download)
+
+To inspect the interface quickly without configuring the backend, run the frontend in its built-in deterministic demo mode:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Open http://localhost:5173. On a fresh clone, do not create `frontend/.env` for this preview; without `VITE_API_BASE_URL`, the UI uses clearly labeled demo data. This preview is for evaluating the interface, not live YouTube analysis.
+
 ## Quick start
 
 You need:
